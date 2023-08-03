@@ -1,0 +1,58 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: "finetuneshape-imagemultiview"
+  namespace: yuzhipeng
+spec:
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        spec:
+          imagePullSecrets:
+            - name: vast-secret
+          containers:
+          - image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/wavelet:shapE_zhipeng_v3
+            name: pytorch
+            securityContext:
+              #runAsUser: 1008
+              #runAsGroup: 1008
+              capabilities:
+                add: ["IPC_LOCK"]
+            resources:
+              limits:
+                baidu.com/a800_80g_cgpu: "1"
+                rdma/hca: 1
+              requests:
+                baidu.com/a800_80g_cgpu: "1"
+                rdma/hca: 1
+            command:
+              - "/bin/sh"
+              - "-c"
+              - "cd /mnt/pfs/users/yuzhipeng/shapeE/shap-e/ && python finetune_shapE_image_multiview.py --gpus 1 --batch_size 16 --save_name 'shapE_image_multiview_bs16_lr1e5'"
+              #- "rm -r /mnt/pfs/data/zhipeng/SDF_data/20230628/"
+            env:
+              - name: CONFIG
+                value: configs/resnet/resnet152_8xb32_in1k.py
+              - name: NCCL_DEBUG
+                value: INFO
+              - name: NCCL_IB_DISABLE
+                value: "0"
+              - name: LOCAL_RANK
+                value: "0"
+            volumeMounts:
+              - mountPath: /mnt/pfs
+                name: pfs
+              - mountPath: /dev/shm
+                name: cache-volume
+          volumes:
+            - name: pfs
+              hostPath:
+                path: /mnt/pfs
+            - emptyDir:
+                medium: Memory
+              name: cache-volume
+          priorityClassName: normal
+          schedulerName: volcano
+

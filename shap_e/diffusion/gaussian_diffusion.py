@@ -337,7 +337,7 @@ class GaussianDiffusion:
             extra = None
 
         if self.model_var_type in ["learned", "learned_range"]:
-            assert model_output.shape == (B, C * 2, *x.shape[2:])
+            assert model_output.shape == (B, C * 2, *x.shape[2:]), f'{model_output.shape} {(B, C * 2, *x.shape[2:])} mismatch'
             model_output, model_var_values = th.split(model_output, C, dim=1)
             if self.model_var_type == "learned":
                 model_log_variance = model_var_values
@@ -860,7 +860,8 @@ class GaussianDiffusion:
                     B,
                     C * 2,
                     *x_t.shape[2:],
-                ), f"{model_output.shape} != {(B, C * 2, *x_t.shape[2:])}"
+                ), f"{model_output.shape} != {(B, C * 2, *x_t.shape[2:])} target shape: {x_start.shape}"
+
                 model_output, model_var_values = th.split(model_output, C, dim=1)
                 # Learn the variance using the variational bound, but don't let
                 # it affect our mean prediction.

@@ -61,8 +61,14 @@ def import_model(path):
 
 def scene_root_objects():
     for obj in bpy.context.scene.objects.values():
-        if not obj.parent:
+        if not obj.parent and obj.type == "MESH":
+            # for coord in obj.bound_box:
+            #     coord = Vector(coord)
+                # coord = obj.matrix_world @ coord
+                # print(obj.name, coord,  obj.scale, flush=True)
             yield obj
+    # mesh_objects = [
+    #     obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
 
 
 def scene_bbox(single_obj=None, ignore_matrix=False):
@@ -91,12 +97,13 @@ def scene_meshes():
 def normalize_scene():
     bbox_min, bbox_max = scene_bbox()
     scale = 1 / max(bbox_max - bbox_min)
-
+    # print(f"bbox_min: {bbox_min}, bbox_max: {bbox_max}, scale: {scale}", flush=True)
+    # scale = max(scale, 1/50)
     for obj in scene_root_objects():
         obj.scale = obj.scale * scale
 
     # Apply scale to matrix_world.
-    bpy.context.view_layer.update()
+    bpy.context.view_layer.update() 
 
     bbox_min, bbox_max = scene_bbox()
     offset = -(bbox_min + bbox_max) / 2

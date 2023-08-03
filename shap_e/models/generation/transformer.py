@@ -165,6 +165,7 @@ class PointDiffusionTransformer(nn.Module):
         use_pos_emb: bool = False,
         pos_emb_init_scale: float = 1.0,
         pos_emb_n_ctx: Optional[int] = None,
+        **kwargs,
     ):
         super().__init__()
         self.input_channels = input_channels
@@ -224,6 +225,8 @@ class PointDiffusionTransformer(nn.Module):
             for emb, as_token in cond_as_token
             if as_token
         ]
+
+        # print(h.shape, extra_tokens[0].shape, extra_tokens[1].shape, flush=True)
         if len(extra_tokens):
             h = torch.cat(extra_tokens + [h], dim=1)
 
@@ -307,6 +310,7 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
         n_ctx: int = 1024,
         cond_drop_prob: float = 0.0,
         frozen_clip: bool = True,
+        num_views: int = 1,
         **kwargs,
     ):
         clip = (FrozenImageCLIP if frozen_clip else ImageCLIP)(device)
@@ -325,6 +329,15 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
             ),
             nn.Linear(self.clip.grid_feature_dim, self.backbone.width, device=device, dtype=dtype),
         )
+        self.num_views = num_views
+        if num_views > 1:
+            self.clip_embed_multiview = nn.Sequential(
+                nn.LayerNorm(
+                    normalized_shape=(self.clip.grid_feature_dim * num_views,), device=device, dtype=dtype
+                ),
+                nn.Linear(self.clip.grid_feature_dim * num_views, self.backbone.width, device=device, dtype=dtype),
+            )
+
         self.cond_drop_prob = cond_drop_prob
 
     def cached_model_kwargs(self, batch_size: int, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -362,8 +375,99 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
             clip_out = clip_out * mask[:, None, None].to(clip_out)
 
         clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
-        clip_embed = self.clip_embed(clip_out)
+        if self.num_views >1 :
+            assert clip_out.shape[0] % self.num_views == 0
+            clip_out = clip_out.reshap(clip_out.shape[0] // self.num_views, -1)
+            clip_embed = self.clip_embed_multiview(clip_out)
+        else:
+            clip_embed = self.clip_embed(clip_out)
 
+        cond = [(t_embed, self.time_token_cond), (clip_embed, True)]
+        return self._forward_with_cond(x, cond)
+
+class CLIPImageGridPointDiffusionMultiViewTransformer(PointDiffusionTransformer):
+    def __init__(
+        self,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        n_ctx: int = 1024,
+        cond_drop_prob: float = 0.0,
+        frozen_clip: bool = True,
+        # num_views: int = 1,
+        **kwargs,
+    ):
+        clip = (FrozenImageCLIP if frozen_clip else ImageCLIP)(device)
+        super().__init__(
+            device=device,
+            dtype=dtype,
+            n_ctx=n_ctx + clip.grid_size**2,
+            pos_emb_n_ctx=n_ctx,
+            **kwargs,
+        )
+        self.n_ctx = n_ctx
+        self.clip = clip
+
+        self.num_views = kwargs['num_views']
+        # if self.num_views > 1:
+        self.clip_embed = nn.Sequential(
+            nn.LayerNorm(
+                normalized_shape=(self.clip.grid_feature_dim * self.num_views,), device=device, dtype=dtype
+            ),
+            nn.Linear(self.clip.grid_feature_dim * self.num_views, self.backbone.width, device=device, dtype=dtype),
+        )
+        self.cond_drop_prob = cond_drop_prob
+
+    def cached_model_kwargs(self, batch_size: int, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        _ = batch_size
+        with torch.no_grad():
+            return dict(embeddings=self.clip.embed_images_grid(model_kwargs["images"]))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        images: Optional[Iterable[ImageType]] = None,
+        embeddings: Optional[Iterable[torch.Tensor]] = None,
+    ):
+        """
+        :param x: an [N x C x T] tensor.
+        :param t: an [N] tensor.
+        :param images: a batch of images to condition on.
+        :param embeddings: a batch of CLIP latent grids to condition on.
+        :return: an [N x C' x T] tensor.
+        """
+        assert images is not None or embeddings is not None, "must specify images or embeddings"
+        assert images is None or embeddings is None, "cannot specify both images and embeddings"
+        assert x.shape[-1] == self.n_ctx
+
+        t_embed = self.time_embed(timestep_embedding(t, self.backbone.width))
+
+        if images is not None:
+            clip_out = self.clip.embed_images_grid(images)
+            # print(images.shape, flush=True)
+        else:
+            clip_out = embeddings
+            # print(embeddings.shape, flush=True)
+
+        if self.training:
+            mask = torch.rand(size=[len(clip_out)]) >= self.cond_drop_prob
+            clip_out = clip_out * mask[:, None, None].to(clip_out)
+
+        clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
+    
+        # print(x.shape, clip_out.shape, self.num_views, flush=True)
+
+        if self.num_views >1 :
+            assert clip_out.shape[0] % self.num_views == 0
+            batch_size = clip_out.shape[0] // self.num_views
+            # clip_out = clip_out.reshape(clip_out.shape[0] // self.num_views, clip_out.shape[1], clip_out.shape[2] * self.num_views)
+            clip_out = clip_out.reshape(batch_size,self.num_views, clip_out.shape[1], clip_out.shape[2]).permute(0,2,1,3)
+            clip_out = clip_out.reshape(batch_size, clip_out.shape[1], -1)
+            clip_embed = self.clip_embed(clip_out)
+        else:
+            clip_embed = self.clip_embed(clip_out)
+        # print(clip_out.shape, self.num_views, clip_embed.shape ,flush=True)
         cond = [(t_embed, self.time_token_cond), (clip_embed, True)]
         return self._forward_with_cond(x, cond)
 

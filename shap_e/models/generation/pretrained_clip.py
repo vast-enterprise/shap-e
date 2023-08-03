@@ -42,6 +42,7 @@ class ImageCLIP(nn.Module):
         if dtype is not None:
             self.clip_model.to(dtype)
         self._tokenize = clip.tokenize
+        self.num_view = None
 
     @property
     def feature_dim(self) -> int:
@@ -82,22 +83,28 @@ class ImageCLIP(nn.Module):
         """
         image_seq = [None] * batch_size if images is None else list(images)
         text_seq = [None] * batch_size if texts is None else list(texts)
-        embedding_seq = [None] * batch_size if embeddings is None else list(embeddings)
-        assert len(image_seq) == batch_size, "number of images should match batch size"
-        assert len(text_seq) == batch_size, "number of texts should match batch size"
-        assert len(embedding_seq) == batch_size, "number of embeddings should match batch size"
+        embedding_seq = [None] * \
+            batch_size if embeddings is None else list(embeddings)
+        assert len(
+            image_seq) == batch_size, f'{len(image_seq)} {batch_size} number of images should match batch size'
+        assert len(
+            text_seq) == batch_size, "number of texts should match batch size"
+        assert len(
+            embedding_seq) == batch_size, "number of embeddings should match batch size"
 
         if self.ensure_used_params:
             return self._static_multimodal_embed(
                 images=image_seq, texts=text_seq, embeddings=embedding_seq
             )
 
-        result = torch.zeros((batch_size, self.feature_dim), device=self.device)
+        result = torch.zeros(
+            (batch_size, self.feature_dim), device=self.device)
         index_images = []
         index_texts = []
         for i, (image, text, emb) in enumerate(zip(image_seq, text_seq, embedding_seq)):
             assert (
-                sum([int(image is not None), int(text is not None), int(emb is not None)]) < 2
+                sum([int(image is not None), int(
+                    text is not None), int(emb is not None)]) < 2
             ), "only one modality may be non-None per batch element"
             if image is not None:
                 index_images.append((i, image))
@@ -161,9 +168,16 @@ class ImageCLIP(nn.Module):
         :param xs: N images, stored as numpy arrays, tensors, or PIL images.
         :return: an [N x D] tensor of features.
         """
-        clip_inputs = self.images_to_tensor(xs)
-        results = self.clip_model.encode_image(clip_inputs).float()
-        return results / torch.linalg.norm(results, dim=-1, keepdim=True)
+        clip_inputs = self.images_to_tensor_multiview(xs)
+        batch_size = xs.shape[0]
+        if self.num_view is not None:
+            results = self.clip_model.encode_image(clip_inputs).float()
+            results = results / torch.linalg.norm(results, dim=-1, keepdim=True)
+            results = results.reshap(batch_size, -1)
+            return results
+        else:
+            results = self.clip_model.encode_image(clip_inputs).float()
+            return results / torch.linalg.norm(results, dim=-1, keepdim=True)
 
     def embed_text(self, prompts: Iterable[str]) -> torch.Tensor:
         """
@@ -188,17 +202,19 @@ class ImageCLIP(nn.Module):
         else:
             extra_value = 0.0
 
-        x = self.images_to_tensor(xs).to(self.clip_model.dtype)
+        x = self.images_to_tensor_multiview(xs).to(self.clip_model.dtype)
 
         # https://github.com/openai/CLIP/blob/4d120f3ec35b30bd0f992f5d8af2d793aad98d2a/clip/model.py#L225
         vt = self.clip_model.visual
         x = vt.conv1(x)  # shape = [*, width, grid, grid]
-        x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        # shape = [*, width, grid ** 2]
+        x = x.reshape(x.shape[0], x.shape[1], -1)
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat(
             [
                 vt.class_embedding.to(x.dtype)
-                + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device),
+                + torch.zeros(x.shape[0], 1, x.shape[-1],
+                              dtype=x.dtype, device=x.device),
                 x,
             ],
             dim=1,
@@ -215,10 +231,46 @@ class ImageCLIP(nn.Module):
     def images_to_tensor(self, xs: Iterable[Optional[ImageType]]) -> torch.Tensor:
         return torch.stack([self.preprocess(_image_to_pil(x)) for x in xs], dim=0).to(self.device)
 
+    def images_to_tensor_multiview(self, xs: Iterable[Optional[ImageType]]) -> torch.Tensor:
+        results = []
+        for obj in xs:
+            if obj is None:
+                return Image.fromarray(np.zeros([64, 64, 3], dtype=np.uint8))
+            if isinstance(obj, np.ndarray):
+                if len(obj.shape)==3 and obj.shape[-1] == 3:
+                    results.append(self.preprocess(
+                        Image.fromarray(obj.astype(np.uint8))))
+                elif len(obj.shape)==4 and obj.shape[-1] == 3:
+                    images = []
+                    for i in range(obj.shape[0]):
+                        images.append(self.preprocess(
+                            Image.fromarray(obj[i].astype(np.uint8))))
+                    results.append(torch.stack(images, dim=0))
+                    return torch.cat(results, dim=0).to(self.device)
+                else:
+
+                    num_view = obj.shape[-1] // 3
+                    self.num_view = num_view
+                    obj_multivew = obj.reshape(
+                        obj.shape[0], obj.shape[1],  num_view, 3).transpose(2, 0, 1, 3)
+                    for i, obj_view in enumerate(obj_multivew):
+                        results.append(self.preprocess(
+                            Image.fromarray(obj_view.astype(np.uint8))))
+                        
+            elif isinstance(obj, torch.Tensor):
+                if obj.shape[-1]==3:
+                    return torch.stack([self.preprocess(_image_to_pil(x)) for x in xs], dim=0).to(self.device)
+                else:
+                    raise NotImplementedError
+            else:
+                raise NotImplementedError
+        return torch.stack(results, dim=0).to(self.device)
+
 
 class FrozenImageCLIP:
     def __init__(self, device: torch.device, **kwargs):
-        self.model = ImageCLIP(device, dtype=None, ensure_used_params=False, **kwargs)
+        self.model = ImageCLIP(
+            device, dtype=None, ensure_used_params=False, **kwargs)
         for parameter in self.model.parameters():
             parameter.requires_grad_(False)
 

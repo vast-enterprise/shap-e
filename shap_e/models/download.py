@@ -119,6 +119,14 @@ def load_config(
         return yaml.safe_load(f)
 
 
+def load_config_frompath(
+    config_name: str,
+):
+    with open(config_name, "r") as f:
+        return yaml.safe_load(f)
+
+
+
 def load_checkpoint(
     checkpoint_name: str,
     device: torch.device,
@@ -145,5 +153,25 @@ def load_model(
 
     model = model_from_config(load_config(model_name, **kwargs), device=device)
     model.load_state_dict(load_checkpoint(model_name, device=device, **kwargs))
+    model.eval()
+    return model
+
+def load_model_from_path(
+    model_name: str,
+    model_path:str,
+    device: torch.device,
+    config_path:str = None,
+    **kwargs,
+) -> Dict[str, torch.Tensor]:
+    from .configs import model_from_config
+    if config_path is None:
+        model = model_from_config(load_config(model_name, **kwargs), device=device)
+    else:
+        model = model_from_config(load_config_frompath(config_path), device=device)
+    state_dict = torch.load(model_path, map_location=device)
+    if 'model_state_dict' in state_dict:
+        model.load_state_dict(state_dict['model_state_dict'])
+    else:
+        model.load_state_dict(state_dict)
     model.eval()
     return model

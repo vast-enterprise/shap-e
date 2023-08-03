@@ -23,10 +23,27 @@ class SplitVectorDiffusion(nn.Module):
             h.shape[1] == pre_channels * 2
         ), "expected twice as many outputs for variance prediction"
         eps, var = torch.chunk(h, 2, dim=1)
-        return torch.cat(
-            [
-                eps.permute(0, 2, 1).flatten(1),
-                var.permute(0, 2, 1).flatten(1),
-            ],
-            dim=1,
-        )
+        # output = torch.cat(
+        #          [
+        #         eps.permute(0, 2, 1).flatten(1),
+        #         var.permute(0, 2, 1).flatten(1),
+        #             ],
+        #             dim=1,
+        #     )     
+        # print(eps.shape, var.shape,output.shape,flush=True)
+        if self.training:
+            return torch.stack(
+                [
+                    eps.permute(0, 2, 1).flatten(1),
+                    var.permute(0, 2, 1).flatten(1),
+                ],
+                dim=1,
+            )
+        else:
+            return torch.cat(
+                [
+                    eps.permute(0, 2, 1).flatten(1),
+                    var.permute(0, 2, 1).flatten(1),
+                ],
+                dim=1,
+            )
