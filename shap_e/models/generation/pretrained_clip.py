@@ -263,7 +263,7 @@ class ImageCLIP(nn.Module):
                 else:
                     raise NotImplementedError
             else:
-                raise NotImplementedError
+                results.append(self.preprocess(obj))
         return torch.stack(results, dim=0).to(self.device)
 
 

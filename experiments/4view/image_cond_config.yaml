@@ -4,7 +4,7 @@ inner:
   heads: 8
   init_scale: 0.25
   layers: 24
-  name: CLIPImageGridPointDiffusionMultiViewTransformer
+  name: CLIPImageGridPointDiffusionMultiViewTokenTransformer
   pos_emb_init_scale: 0.05
   time_token_cond: true
   use_pos_emb: true

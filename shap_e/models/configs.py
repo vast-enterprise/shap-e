@@ -11,6 +11,7 @@ from shap_e.models.generation.pooled_mlp import PooledMLP
 from shap_e.models.generation.transformer import (
     CLIPImageGridPointDiffusionTransformer,
     CLIPImageGridPointDiffusionMultiViewTransformer,
+    CLIPImageGridPointDiffusionMultiViewTokenTransformer,
     CLIPImageGridUpsamplePointDiffusionTransformer,
     CLIPImagePointDiffusionTransformer,
     PointDiffusionTransformer,
@@ -120,6 +121,8 @@ def model_from_config(config: Union[str, Dict[str, Any]], device: torch.device) 
         return CLIPImageGridPointDiffusionTransformer(device=device, dtype=torch.float32, **config)
     elif name == "CLIPImageGridPointDiffusionMultiViewTransformer":
         return CLIPImageGridPointDiffusionMultiViewTransformer(device=device, dtype=torch.float32, **config)
+    elif name == "CLIPImageGridPointDiffusionMultiViewTokenTransformer":
+        return CLIPImageGridPointDiffusionMultiViewTokenTransformer(device=device, dtype=torch.float32, **config)    
     elif name == "UpsamplePointDiffusionTransformer":
         return UpsamplePointDiffusionTransformer(device=device, dtype=torch.float32, **config)
     elif name == "CLIPImageGridUpsamplePointDiffusionTransformer":

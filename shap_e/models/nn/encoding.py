@@ -202,6 +202,9 @@ def posenc_nerf(x: torch.Tensor, min_deg: int = 0, max_deg: int = 15) -> torch.T
     Concatenate x and its positional encodings, following NeRF.
 
     Reference: https://arxiv.org/pdf/2210.04628.pdf
+
+    input: [*shape, dim]
+    output: [*shape, dim * (max_deg - min_deg + 1)]
     """
     if min_deg == max_deg:
         return x
@@ -211,6 +214,7 @@ def posenc_nerf(x: torch.Tensor, min_deg: int = 0, max_deg: int = 15) -> torch.T
     assert xb.shape[-1] == dim * (max_deg - min_deg)
     emb = torch.cat([xb, xb + math.pi / 2.0], axis=-1).sin()
     return torch.cat([x, emb], dim=-1)
+
 
 
 @lru_cache

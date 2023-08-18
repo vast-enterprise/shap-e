@@ -33,7 +33,8 @@ class MultiheadAttention(nn.Module):
         self.heads = heads
         self.c_qkv = nn.Linear(width, width * 3, device=device, dtype=dtype)
         self.c_proj = nn.Linear(width, width, device=device, dtype=dtype)
-        self.attention = QKVMultiheadAttention(device=device, dtype=dtype, heads=heads, n_ctx=n_ctx)
+        self.attention = QKVMultiheadAttention(
+            device=device, dtype=dtype, heads=heads, n_ctx=n_ctx)
         init_linear(self.c_qkv, init_scale)
         init_linear(self.c_proj, init_scale)
 
@@ -102,7 +103,8 @@ class ResidualAttentionBlock(nn.Module):
             init_scale=init_scale,
         )
         self.ln_1 = nn.LayerNorm(width, device=device, dtype=dtype)
-        self.mlp = MLP(device=device, dtype=dtype, width=width, init_scale=init_scale)
+        self.mlp = MLP(device=device, dtype=dtype,
+                       width=width, init_scale=init_scale)
         self.ln_2 = nn.LayerNorm(width, device=device, dtype=dtype)
 
     def forward(self, x: torch.Tensor):
@@ -174,7 +176,8 @@ class PointDiffusionTransformer(nn.Module):
         self.time_token_cond = time_token_cond
         self.use_pos_emb = use_pos_emb
         self.time_embed = MLP(
-            device=device, dtype=dtype, width=width, init_scale=init_scale * math.sqrt(1.0 / width)
+            device=device, dtype=dtype, width=width, init_scale=init_scale *
+            math.sqrt(1.0 / width)
         )
         self.ln_pre = nn.LayerNorm(width, device=device, dtype=dtype)
         self.backbone = Transformer(
@@ -187,8 +190,10 @@ class PointDiffusionTransformer(nn.Module):
             init_scale=init_scale,
         )
         self.ln_post = nn.LayerNorm(width, device=device, dtype=dtype)
-        self.input_proj = nn.Linear(input_channels, width, device=device, dtype=dtype)
-        self.output_proj = nn.Linear(width, output_channels, device=device, dtype=dtype)
+        self.input_proj = nn.Linear(
+            input_channels, width, device=device, dtype=dtype)
+        self.output_proj = nn.Linear(
+            width, output_channels, device=device, dtype=dtype)
         with torch.no_grad():
             self.output_proj.weight.zero_()
             self.output_proj.bias.zero_()
@@ -225,16 +230,15 @@ class PointDiffusionTransformer(nn.Module):
             for emb, as_token in cond_as_token
             if as_token
         ]
-
-        # print(h.shape, extra_tokens[0].shape, extra_tokens[1].shape, flush=True)
+        # print(f'_forward_with_cond before', h.shape, flush=True)        
         if len(extra_tokens):
             h = torch.cat(extra_tokens + [h], dim=1)
-
+        # print(f'_forward_with_cond after', h.shape, flush=True)
         h = self.ln_pre(h)
         h = self.backbone(h)
         h = self.ln_post(h)
         if len(extra_tokens):
-            h = h[:, sum(h.shape[1] for h in extra_tokens) :]
+            h = h[:, sum(h.shape[1] for h in extra_tokens):]
         h = self.output_proj(h)
         return h.permute(0, 2, 1)
 
@@ -285,7 +289,8 @@ class CLIPImagePointDiffusionTransformer(PointDiffusionTransformer):
         assert x.shape[-1] == self.n_ctx
 
         t_embed = self.time_embed(timestep_embedding(t, self.backbone.width))
-        clip_out = self.clip(batch_size=len(x), images=images, texts=texts, embeddings=embeddings)
+        clip_out = self.clip(batch_size=len(x), images=images,
+                             texts=texts, embeddings=embeddings)
         assert len(clip_out.shape) == 2 and clip_out.shape[0] == x.shape[0]
 
         if self.training:
@@ -325,9 +330,11 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
         self.clip = clip
         self.clip_embed = nn.Sequential(
             nn.LayerNorm(
-                normalized_shape=(self.clip.grid_feature_dim,), device=device, dtype=dtype
+                normalized_shape=(self.clip.grid_feature_dim,
+                                  ), device=device, dtype=dtype
             ),
-            nn.Linear(self.clip.grid_feature_dim, self.backbone.width, device=device, dtype=dtype),
+            nn.Linear(self.clip.grid_feature_dim,
+                      self.backbone.width, device=device, dtype=dtype),
         )
         self.num_views = num_views
         if num_views > 1:
@@ -335,7 +342,8 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
                 nn.LayerNorm(
                     normalized_shape=(self.clip.grid_feature_dim * num_views,), device=device, dtype=dtype
                 ),
-                nn.Linear(self.clip.grid_feature_dim * num_views, self.backbone.width, device=device, dtype=dtype),
+                nn.Linear(self.clip.grid_feature_dim * num_views,
+                          self.backbone.width, device=device, dtype=dtype),
             )
 
         self.cond_drop_prob = cond_drop_prob
@@ -375,7 +383,7 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
             clip_out = clip_out * mask[:, None, None].to(clip_out)
 
         clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
-        if self.num_views >1 :
+        if self.num_views > 1:
             assert clip_out.shape[0] % self.num_views == 0
             clip_out = clip_out.reshap(clip_out.shape[0] // self.num_views, -1)
             clip_embed = self.clip_embed_multiview(clip_out)
@@ -384,6 +392,7 @@ class CLIPImageGridPointDiffusionTransformer(PointDiffusionTransformer):
 
         cond = [(t_embed, self.time_token_cond), (clip_embed, True)]
         return self._forward_with_cond(x, cond)
+
 
 class CLIPImageGridPointDiffusionMultiViewTransformer(PointDiffusionTransformer):
     def __init__(
@@ -397,24 +406,24 @@ class CLIPImageGridPointDiffusionMultiViewTransformer(PointDiffusionTransformer)
         # num_views: int = 1,
         **kwargs,
     ):
+        self.num_views = kwargs['num_views']
         clip = (FrozenImageCLIP if frozen_clip else ImageCLIP)(device)
         super().__init__(
             device=device,
             dtype=dtype,
-            n_ctx=n_ctx + clip.grid_size**2,
+            n_ctx=n_ctx + clip.grid_size**2 * self.num_views,
             pos_emb_n_ctx=n_ctx,
             **kwargs,
         )
         self.n_ctx = n_ctx
         self.clip = clip
 
-        self.num_views = kwargs['num_views']
-        # if self.num_views > 1:
         self.clip_embed = nn.Sequential(
             nn.LayerNorm(
                 normalized_shape=(self.clip.grid_feature_dim * self.num_views,), device=device, dtype=dtype
             ),
-            nn.Linear(self.clip.grid_feature_dim * self.num_views, self.backbone.width, device=device, dtype=dtype),
+            nn.Linear(self.clip.grid_feature_dim * self.num_views,
+                      self.backbone.width, device=device, dtype=dtype),
         )
         self.cond_drop_prob = cond_drop_prob
 
@@ -455,19 +464,101 @@ class CLIPImageGridPointDiffusionMultiViewTransformer(PointDiffusionTransformer)
             clip_out = clip_out * mask[:, None, None].to(clip_out)
 
         clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
-    
-        # print(x.shape, clip_out.shape, self.num_views, flush=True)
 
-        if self.num_views >1 :
+        print(x.shape, clip_out.shape, self.num_views, flush=True)
+        
+        if self.num_views > 1:
             assert clip_out.shape[0] % self.num_views == 0
             batch_size = clip_out.shape[0] // self.num_views
             # clip_out = clip_out.reshape(clip_out.shape[0] // self.num_views, clip_out.shape[1], clip_out.shape[2] * self.num_views)
-            clip_out = clip_out.reshape(batch_size,self.num_views, clip_out.shape[1], clip_out.shape[2]).permute(0,2,1,3)
+            clip_out = clip_out.reshape(
+                batch_size, self.num_views, clip_out.shape[1], clip_out.shape[2]).permute(0, 2, 1, 3)
             clip_out = clip_out.reshape(batch_size, clip_out.shape[1], -1)
             clip_embed = self.clip_embed(clip_out)
         else:
             clip_embed = self.clip_embed(clip_out)
         # print(clip_out.shape, self.num_views, clip_embed.shape ,flush=True)
+        cond = [(t_embed, self.time_token_cond), (clip_embed, True)]
+        return self._forward_with_cond(x, cond)
+
+
+class CLIPImageGridPointDiffusionMultiViewTokenTransformer(PointDiffusionTransformer):
+    def __init__(
+        self,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        n_ctx: int = 1024,
+        cond_drop_prob: float = 0.0,
+        frozen_clip: bool = True,
+        # num_views: int = 1,
+        **kwargs,
+    ):
+        self.num_views = kwargs['num_views']
+        clip = (FrozenImageCLIP if frozen_clip else ImageCLIP)(device)
+        super().__init__(
+            device=device,
+            dtype=dtype,
+            n_ctx=n_ctx + clip.grid_size**2 * self.num_views,
+            pos_emb_n_ctx=n_ctx,
+            **kwargs,
+        )
+        self.n_ctx = n_ctx
+        self.clip = clip
+
+        self.clip_embed = nn.Sequential(
+            nn.LayerNorm(
+                normalized_shape=(self.clip.grid_feature_dim), device=device, dtype=dtype
+            ),
+            nn.Linear(self.clip.grid_feature_dim,
+                      self.backbone.width, device=device, dtype=dtype),
+        )
+        self.cond_drop_prob = cond_drop_prob
+
+    def cached_model_kwargs(self, batch_size: int, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        _ = batch_size
+        with torch.no_grad():
+            return dict(embeddings=self.clip.embed_images_grid(model_kwargs["images"]))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        images: Optional[Iterable[ImageType]] = None,
+        embeddings: Optional[Iterable[torch.Tensor]] = None,
+    ):
+        """
+        :param x: an [N x C x T] tensor.
+        :param t: an [N] tensor.
+        :param images: a batch of images to condition on.
+        :param embeddings: a batch of CLIP latent grids to condition on.
+        :return: an [N x C' x T] tensor.
+        """
+        assert images is not None or embeddings is not None, "must specify images or embeddings"
+        assert images is None or embeddings is None, "cannot specify both images and embeddings"
+        assert x.shape[-1] == self.n_ctx
+
+        t_embed = self.time_embed(timestep_embedding(t, self.backbone.width))
+
+        if images is not None:
+            clip_out = self.clip.embed_images_grid(images)
+        else:
+            clip_out = embeddings
+        # print('CLIP shape',images.shape, clip_out.shape, flush=True)
+        if self.training:
+            mask = torch.rand(size=[len(clip_out)]) >= self.cond_drop_prob
+            clip_out = clip_out * mask[:, None, None].to(clip_out)
+        # print(f'clip out shape: {clip_out.shape}', flush=True)
+        clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
+        if self.num_views > 1:
+            assert clip_out.shape[0] % self.num_views == 0
+            batch_size = clip_out.shape[0] // self.num_views
+            # cat num_views in token dim
+            clip_out = clip_out.reshape(batch_size, clip_out.shape[1] * self.num_views, clip_out.shape[2])
+            clip_embed = self.clip_embed(clip_out)
+        else:
+            clip_embed = self.clip_embed(clip_out)
+        # print('clip out shape: ', clip_out.shape, 't_embed.shape', t_embed.shape, self.num_views, clip_embed.shape ,flush=True)
         cond = [(t_embed, self.time_token_cond), (clip_embed, True)]
         return self._forward_with_cond(x, cond)
 
@@ -538,15 +629,18 @@ class CLIPImageGridUpsamplePointDiffusionTransformer(UpsamplePointDiffusionTrans
         **kwargs,
     ):
         clip = (FrozenImageCLIP if frozen_clip else ImageCLIP)(device)
-        super().__init__(device=device, dtype=dtype, n_ctx=n_ctx + clip.grid_size**2, **kwargs)
+        super().__init__(device=device, dtype=dtype,
+                         n_ctx=n_ctx + clip.grid_size**2, **kwargs)
         self.n_ctx = n_ctx
 
         self.clip = clip
         self.clip_embed = nn.Sequential(
             nn.LayerNorm(
-                normalized_shape=(self.clip.grid_feature_dim,), device=device, dtype=dtype
+                normalized_shape=(self.clip.grid_feature_dim,
+                                  ), device=device, dtype=dtype
             ),
-            nn.Linear(self.clip.grid_feature_dim, self.backbone.width, device=device, dtype=dtype),
+            nn.Linear(self.clip.grid_feature_dim,
+                      self.backbone.width, device=device, dtype=dtype),
         )
         self.cond_drop_prob = cond_drop_prob
 
@@ -591,5 +685,6 @@ class CLIPImageGridUpsamplePointDiffusionTransformer(UpsamplePointDiffusionTrans
         clip_out = clip_out.permute(0, 2, 1)  # NCL -> NLC
         clip_embed = self.clip_embed(clip_out)
 
-        cond = [(t_embed, self.time_token_cond), (clip_embed, True), (low_res_embed, True)]
+        cond = [(t_embed, self.time_token_cond),
+                (clip_embed, True), (low_res_embed, True)]
         return self._forward_with_cond(x, cond)
